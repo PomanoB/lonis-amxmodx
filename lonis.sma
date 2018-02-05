@@ -46,6 +46,7 @@ new g_CvarFails[fail]
 new g_CvarFail_Kick
 new g_CvarFail_Tag
 new g_CvarUnreg_Kick
+new g_CvarAutoReg
 new g_CvarUnreg_Tag
 new g_CvarUnreg_KickReason
 
@@ -76,6 +77,7 @@ public plugin_init()
 	g_CvarUnreg_Kick = register_cvar("lonis_unreg_kick", "0")
 	g_CvarUnreg_KickReason = register_cvar("lonis_unreg_kickreason", "You must be registered on this server")
 	g_CvarUnreg_Tag = register_cvar("lonis_unreg_tag", "")
+	g_CvarAutoReg = register_cvar("lonis_auto_reg", "1")
 
 	g_CvarAMXXFlag = register_cvar("lonis_reg_flag", "")
 	
@@ -94,7 +96,7 @@ public plugin_precache()
 	g_CvarPassword = register_cvar("lonis_password", "")
 	g_CvarPrefix = register_cvar("lonis_prefix", "unr")
 	
-	g_CvarDebug = register_cvar("lonis_debug", "1")
+	g_CvarDebug = register_cvar("lonis_debug", "0")
 	
 	g_lnsSettings = ArrayCreate(LNS_SETTINGS, 32)
 	
@@ -205,7 +207,8 @@ public client_putinserver(id)
 	if (g_SQL_Connection)
 	{
 		remove_task(id)
-		set_task(2.0, "checkName", id)
+		if (!is_user_bot(id))
+			set_task(2.0, "checkName", id)
 	}
 }
 
@@ -234,129 +237,8 @@ public checkName(id)
 	static query[512]
 	
 	formatex(query, charsmax(query), "SELECT `password`, `ip`, `steam_id`, `flags`, `amxx_flags`, `id`, `auth`, `name` FROM `{prefix}_players` WHERE ((`name` = '%s' AND `auth` = 0) OR ((`steam_id` = '%s' OR `steam_id` = '%s') AND `auth` = 1))  AND `active` = 1", name, steamid, steamid2)
-//	server_print("^nLOGIN QUERY ^n%s", query)
 	lonis_mysql_thread_query(query, "login_query_handler", data, 2)
-	
-	/*
-	static name[32], unquoted_name[32], steamid[32], ip_int, unreg_tag[32], amx_flags[33]
-	static password[32], user_password[40], bd_ip[32], bd_ip_int, reg_flag[32], auth
-	static flags, steam_id[32], ip[32], subnet[32], mask[10], mask_int, md5p[34], bdId
-	static login[32]
-	
-	get_pcvar_string(g_CvarUnreg_Tag, unreg_tag, 31)
-	
-	get_user_name(id, unquoted_name,31)
-	
-	if (!unquoted_name[0])
-		return
-	
-	SQL_QuoteString(g_SQL_Connection, name, 31, unquoted_name)
-	get_user_info(id, "_pw", password, 33)
-	md5(password, md5p)
-	get_user_authid(id, steamid, 31)
-	get_user_ip(id, ip, 31, 1)
-	
-	g_user_bd_id[id] = 0
-	
-	new data[2]
-	data[0] = id
-	data[1] = get_user_userid(id)
-	
-	static query[256]
-	
-	new Handle:query = lonis_mysql_query("SELECT `password`, `ip`, `steam_id`, `flags`, `amxx_flags`, `id`, `auth`, `name` FROM `{prefix}_players` WHERE ((`name` = '%s' AND `auth` = 0) OR (`steam_id` = '%s' AND `auth` = 1))  AND `active` = 1", name, steamid)
-	if (query != Empty_Handle && SQL_NumResults(query))
-	{
-		flags = SQL_ReadResult(query, 3)
-		SQL_ReadResult(query, 0, user_password, 39)
-		SQL_ReadResult(query, 1, subnet, 31)
-		SQL_ReadResult(query, 2, steam_id, 31)
-		SQL_ReadResult(query, 4, amx_flags, 32)
-		bdId = SQL_ReadResult(query, 5)
-		auth = SQL_ReadResult(query, 6)
-		SQL_ReadResult(query, 7, login, 31)
-		
-		strtok(subnet, bd_ip, 31, mask, 8, '/', 1)
-		bd_ip_int = ip_to_num(bd_ip)
-		ip_int = ip_to_num(ip)
-		mask_int = str_to_num(mask)
-		
-		if (auth)
-		{
-			if (!equal(steam_id, steamid))
-			{
-				loginFailed(id, fail_steam_id)
-				SQL_FreeHandle(query)
-				return
-			}
-		}
-		else
-		if (!equal(md5p, user_password))
-		{
-			loginFailed(id, fail_password)
-			
-			g_user_bd_id[id] = 0
-			ExecuteForward(g_fwd_player_login, flags, id, 0)
-			
-			SQL_FreeHandle(query)
-			return
-		}
-			
-		if (!auth && (flags & LOCK_STEAM_ID) && !equal(steam_id, steamid))
-		{
-			loginFailed(id, fail_steam_id)
-			
-			g_user_bd_id[id] = 0
-			ExecuteForward(g_fwd_player_login, flags, id, 0)
-			
-			SQL_FreeHandle(query)
-			return
-		}
-		if ((flags & LOCK_IP) && (apply_mask(ip_int, mask_int) != apply_mask(bd_ip_int, mask_int)))
-		{
-			loginFailed(id, fail_ip)
-			
-			g_user_bd_id[id] = 0
-			ExecuteForward(g_fwd_player_login, flags, id, 0)
-			
-			SQL_FreeHandle(query)
-			return
-		
-		}
-		SQL_FreeHandle(query)
-		
-		get_pcvar_string(g_CvarAMXXFlag, reg_flag, 31)
-		set_user_flags(id, get_user_flags(id)|read_flags(reg_flag)|read_flags(amx_flags))
-		
-		client_print(id, print_console, "%L", id, "LOGIN_OK", login)
-		ColorChat(id, GREEN, "%L", id, "LOGIN_CHAT", login)
 
-		g_user_bd_id[id] = bdId
-		ExecuteForward(g_fwd_player_login, flags, id, bdId)
-	}
-	else
-	if (get_pcvar_num(g_CvarUnreg_Kick))
-	{
-		new kick_reason[128]
-		get_pcvar_string(g_CvarUnreg_KickReason, kick_reason, 127)
-		
-		message_begin(MSG_ONE_UNRELIABLE, SVC_DISCONNECT, _, id)
-		write_string(kick_reason)
-		message_end()	
-	}
-	else
-	{
-		if (unreg_tag[0])
-		{
-			add(unreg_tag, 31, unquoted_name)
-			client_cmd(id, "setinfo name ^"%s^"", unreg_tag)
-		}
-		
-		ExecuteForward(g_fwd_player_login, flags, id, 0)
-			
-		g_user_bd_id[id] = 0
-	}
-	*/
 }
 
 public login_query_handler(failstate, Handle:query, error[], errnum, data[], len, Float:queuetime)
@@ -375,9 +257,10 @@ public login_query_handler(failstate, Handle:query, error[], errnum, data[], len
 	if (failstate != TQUERY_SUCCESS)
 	{
 		server_print("^nLOGIN QUERY FAIL^n%s", error)
+		return
 	}
 	
-	if (failstate == TQUERY_SUCCESS && SQL_NumResults(query))
+	if (SQL_NumResults(query))
 	{
 		get_user_info(id, "_pw", password, 19)
 		md5(password, md5p)
@@ -463,19 +346,113 @@ public login_query_handler(failstate, Handle:query, error[], errnum, data[], len
 	}
 	else
 	{
-		get_pcvar_string(g_CvarUnreg_Tag, unreg_tag, 31)
-	
-		if (unreg_tag[0])
+		get_user_authid(id, steamid, 31)
+		if (get_pcvar_num(g_CvarAutoReg) && equal(steamid, "STEAM_0:", 8))
 		{
-			new unquoted_name[32]
-			get_user_name(id, unquoted_name, 31)
-			add(unreg_tag, 31, unquoted_name)
-			client_cmd(id, "setinfo name ^"%s^"", unreg_tag)
+			doAutoRegPlayer(id, 0)
 		}
-		
-		ExecuteForward(g_fwd_player_login, flags, id, 0)
+		else
+		{
+			get_pcvar_string(g_CvarUnreg_Tag, unreg_tag, 31)
+	
+			if (unreg_tag[0])
+			{
+				new unquoted_name[32]
+				get_user_name(id, unquoted_name, 31)
+				add(unreg_tag, 31, unquoted_name)
+				client_cmd(id, "setinfo name ^"%s^"", unreg_tag)
+			}
 			
+			g_user_bd_id[id] = 0
+			ExecuteForward(g_fwd_player_login, flags, id, 0)			
+		}		
+	}
+}
+
+public doAutoRegPlayer(id, attempt)
+{
+	server_print("^nNEW PLAYER REG %d^n", attempt)
+			
+	if (attempt >= 5)
+	{
 		g_user_bd_id[id] = 0
+		new ret
+		ExecuteForward(g_fwd_player_login, ret, id, 0)
+		return
+	}
+	
+	
+	static query[512]
+	
+	new unquoted_name[32], name[64], ip[32], steamid[32]
+	get_user_name(id, unquoted_name,31)
+	
+	
+	if (attempt > 0)
+	{
+		format(unquoted_name, charsmax(unquoted_name), 
+			"%s(%d)", unquoted_name, random_num(1, 35535))
+	}
+	
+	SQL_QuoteString(g_SQL_Connection, name, 31, unquoted_name)
+	get_user_ip(id, ip, 31, 1)
+	get_user_authid(id, steamid, 31)
+	new steam64[32]
+	steam64 = getSteamId64(steamid)
+
+	formatex(query, charsmax(query),
+		"INSERT INTO `{prefix}_players` \
+		(`name`, `steam_id`, `steam_id_64`, `lastIp`, `flags`,`auth`, `active`, `lastTime`, `password`, `ip`, `onlineTime`, `amxx_flags`, `email`) \
+		VALUES('%s', '%s', '%s', '%s', %d, 1, 1, 0, '', '', 0 , '', '')",
+			name, steamid, steam64, ip, LOCK_STEAM_ID)
+			
+	new data[3]
+	data[0] = id
+	data[1] = get_user_userid(id)
+	data[2] = attempt
+	lonis_mysql_thread_query(query, "login_auto_reg_query_handler", data, 3)
+}
+
+public login_auto_reg_query_handler(failstate, Handle:query, error[], errnum, data[], len, Float:queuetime)
+{
+	static id
+	id = data[0]
+	
+	if (!is_user_connected(id) || get_user_userid(id) != data[1])
+	{
+		SQL_FreeHandle(query)	
+		return
+	}
+
+	if (failstate != TQUERY_SUCCESS)
+	{
+		server_print("^nAUTO TREG QUERY FAIL(%d), %s", errnum, error)
+		if (errnum == 1062)
+		{
+			new attempt = data[2]
+			doAutoRegPlayer(id, ++attempt)
+		}
+		SQL_FreeHandle(query)
+		return
+	}
+	
+	if (failstate == TQUERY_SUCCESS)
+	{
+		new bdId = SQL_GetInsertId(query);
+		new reg_flag[32]
+		new login[32]
+		get_user_name(id, login, 31)
+		get_pcvar_string(g_CvarAMXXFlag, reg_flag, 31)
+		set_user_flags(id, get_user_flags(id) | read_flags(reg_flag))
+		
+		client_print(id, print_console, "%L", id, "LOGIN_OK", login)
+		ColorChat(id, GREEN, "%L", id, "LOGIN_CHAT", login)
+
+		g_user_bd_id[id] = bdId
+		new ret
+		ExecuteForward(g_fwd_player_login, ret, id, bdId)
+		
+		SQL_FreeHandle(query)
 	}
 }
 
@@ -601,7 +578,7 @@ public thread_query_handler(failstate, Handle:query, error[], errnum, data[], le
 	if (failstate != TQUERY_SUCCESS)
 	{
 		log_amx("[LONIS] Thread Query Error (%d): %s", errnum, error)
-		return
+		//return
 	}
 	new fID = data[THREAD_FUNC]
 	
@@ -753,3 +730,44 @@ stock ip_to_num ( const ip[] )
 
 	return _ip
 }
+
+stock getSteamId64(steam[])
+{
+    /*
+    STEAM_X:Y:ZZZZZZZZ
+    
+    X, game you are playing (CS, DOD, L4D, TF2, etc)
+    Y, Some people have a 0, some people have a 1
+    Z, is your own num.
+    */
+    
+    new authServer = 0, clientId = 0//, gameType = 0
+    
+    //replace_all(steam, size, "STEAM_", "")
+    
+    new Parts[3][18]
+    str_explode(steam, ':', Parts, 3, 17)
+    
+    //gameType = str_to_num(Parts[0])
+    authServer = str_to_num(Parts[1])
+    clientId = str_to_num(Parts[2])
+    
+    //Calculate SteamID64
+    new FriendId = 60265728 + authServer + (clientId * 2)
+    new Result[18]
+    formatex(Result, 35, "%s%i", "765611979", FriendId)
+    return Result
+}
+
+
+str_explode(const string[], delimiter, output[][], output_size, output_len) 
+{
+    new i, pos, len = strlen(string)
+    
+    do {
+        pos += (copyc(output[i], output_len, string[pos], delimiter) + 1)
+    }
+    while(pos < len && ++i < output_size)
+        
+    return i
+} 
